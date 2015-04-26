@@ -1,0 +1,198 @@
+---
+title: "PML-Course Project"
+author: "Pradeep Kondamuri"
+date: "Sunday, April 26, 2015"
+output: html_document
+---
+
+##Introduction
+As discussed in one of the class lectures, the following is the order of the steps involved in predictions using ML algorithms: 
+*Question -> input data -> features -> algorithm (with parameters) -> evaluation*. 
+The above steps in the context of this course project are described below.
+
+##Question
+As per the project assignment description, the goal of this project is to predict the manner in which the participants did the exercise given the data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. The participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+
+##Input data
+The data for this project was sourced from <http://groupware.les.inf.puc-rio.br/har>. The data was split into two CSV files, pml-training and pml-testing. The training file was used for building the model whereas the testing file was used to predict the exercise manner in 20 different scenarios. The original data included 160 columns, although a majority of the columns were either NA or empty. The 'classe' column is the response variable that the model is supposed to predict. It has five levels, A to E.
+
+##Features
+Through visual inspection, all the columns (features) with NA or empty values along with the columns with descriptive fields like index, user name, timestamps, and window number were removed from both datasets. The trimmed datasets had 53 columns including 'classe' in training set and 'program_id' in testing set and 19622 rows (observations).
+The training data set was subdivided into model training and model testing data subsets (60:40 ratio) using createDataPartition function from the caret package.
+
+```{r}
+#load the caret package
+library(caret)
+
+#Read the trimmed data from the CSV file
+exercise_data<-read.csv("C:/Users/pkondamu/Desktop/Data Science/Coursera/Practical Machine Learning/Course Project/pml-training-trimmed.csv")
+
+#Partition the data in to training and testing subsets in 60:40 ratio
+inTrain<-createDataPartition(y=exercise_data$classe,p=0.6,list=FALSE)
+training<-exercise_data[inTrain,]
+testing<-exercise_data[-inTrain,]
+
+#Check the dimensions of training and testing subsets
+dim(training)
+dim(testing)
+```
+
+In an attempt to reduce the features further (from 52), near zero variance test was performed, however based on the results no further features could be removed.
+
+```{r}
+#Run the near zero variance test
+nsv<-nearZeroVar(training, saveMetrics=TRUE)
+
+#Display the NZV test results
+nsv
+
+#Verify if there are any features with zero variance
+sum(nsv$ZeroVar)
+#Verify if there are any features with near zero variance
+sum(nsv$nzv)
+```
+
+
+##Algorithm(s)
+Multiple ML algorithms were attempted including decision trees (rpart), linear discriminant analysis (lda) and random forests(rf) as they are among the most popular algorithms for classification problems. However, in this report only lda and rf are discussed.
+
+##Evaluation
+Cross-validation using k-fold (with k=4) method was used to assess the performance of each of the ML algorithms used, in terms of in sample error rate on training subset and out of sample error rate on testing subset. A value of 4 for k seemed to be optimal, trading off well between computational speed and accuracy. 
+
+###LDA
+LDA performed pretty poorly with in sample error rates of 0.291 determined using confusionMatrix function from caret. 
+
+```{r}
+#Set the seed for repeatable results
+set.seed(12345)
+#Model fit using LDA and 4-fold cross validation
+modFit_lda<-train(training$classe~.,data=training,method="lda",trControl=trainControl(method="cv",number=4))  
+#Print the model parameters
+modFit_lda
+
+#Verify the in sample accuracy/error rate
+pred_train<-predict(modFit_lda,training)
+print(confusionMatrix(pred_train,training$classe))
+````
+
+
+Pre-processing (center and scale) the data did not improve the in sample accuracy. 
+
+```{r}
+set.seed(12345)
+modFit_lda_pre<-train(training$classe~.,data=training,preProcess=c("center","scale"),method="lda",trControl=trainControl(method="cv",number=4))
+modFit_lda_pre
+pred_train<-predict(modFit_lda_pre,training)
+confusionMatrix(pred_train,training$classe)
+```
+
+The out of sample error on the testing subset turned out to be 0.293.
+```{r}
+#Verify the out of sample accuracy/error rate
+pred_test<-predict(modFit_lda,testing)
+confusionMatrix(pred_test,testing$classe)
+```
+
+###Random Forest
+Random Forest, on the other hand performed very well with in sample error rate of 0.
+```{r}
+#Set the seed for repeatable results
+set.seed(12345)
+
+#Model fit using random forest and 4-fold cross validation
+modFit_rf<-train(training$classe ~.,data=training, method="rf",trControl=trainControl(method="cv",number=4))
+
+#Display the model parameters
+modFit_rf
+#Check the in sample accuracy/error rate
+pred_train<-predict(modFit_rf,training)
+confusionMatrix(pred_train,training$classe)
+
+```
+
+
+There was a concern of overfitting since the in sample error rate was zero. In an attempt to minimize the correlation between the features, preprocessing using PCA was performed which resulted in 19 PC features for 90% variance. However, the in sample error rate still remained zero. This made the algorithm choice easy.
+```
+> preProc<-preProcess(exercise_data[,-53],method='pca',thresh=0.90)
+> print(preProc)
+
+Call:
+preProcess.default(x = exercise_data[, -53], method = "pca", thresh = 0.9)
+
+Created from 19622 samples and 52 variables
+Pre-processing: principal component signal extraction, scaled, centered 
+
+PCA needed 19 components to capture 90 percent of the variance
+
+> print(modFit_rf_pca)
+
+Random Forest 
+
+11776 samples
+   52 predictor
+    5 classes: 'A', 'B', 'C', 'D', 'E' 
+
+No pre-processing
+Resampling: Cross-Validated (4 fold) 
+
+Summary of sample sizes: 8832, 8831, 8833, 8832 
+
+Resampling results across tuning parameters:
+
+  mtry  Accuracy   Kappa      Accuracy SD  Kappa SD   
+   2    0.9881958  0.9850666  0.003205859  0.004057064
+  27    0.9881959  0.9850658  0.001971538  0.002495361
+  52    0.9809777  0.9759326  0.005555346  0.007023066
+
+Accuracy was used to select the optimal model using  the largest value.
+The final value used for the model was mtry = 27. 
+
+> print(confusionMatrix(pred_train_pca,training$classe))
+
+Confusion Matrix and Statistics
+
+          Reference
+Prediction    A    B    C    D    E
+         A 3348    0    0    0    0
+         B    0 2279    0    0    0
+         C    0    0 2054    0    0
+         D    0    0    0 1930    0
+         E    0    0    0    0 2165
+
+Overall Statistics
+                                     
+               Accuracy : 1          
+                 95% CI : (0.9997, 1)
+    No Information Rate : 0.2843     
+    P-Value [Acc > NIR] : < 2.2e-16  
+                                     
+                  Kappa : 1          
+ Mcnemar's Test P-Value : NA         
+
+Statistics by Class:
+
+                     Class: A Class: B Class: C Class: D Class: E
+Sensitivity            1.0000   1.0000   1.0000   1.0000   1.0000
+Specificity            1.0000   1.0000   1.0000   1.0000   1.0000
+Pos Pred Value         1.0000   1.0000   1.0000   1.0000   1.0000
+Neg Pred Value         1.0000   1.0000   1.0000   1.0000   1.0000
+Prevalence             0.2843   0.1935   0.1744   0.1639   0.1838
+Detection Rate         0.2843   0.1935   0.1744   0.1639   0.1838
+Detection Prevalence   0.2843   0.1935   0.1744   0.1639   0.1838
+Balanced Accuracy      1.0000   1.0000   1.0000   1.0000   1.0000
+```
+
+The out of sample error (using the rf model without PCA turned out to be very low as well, 0.007.
+
+```{r}
+#Check the out of sample accuracy/error rate
+pred_test<-predict(modFit_rf,testing)
+confusionMatrix(pred_test,testing$classe)
+
+```
+
+
+Finally, the 'classe' variable was predicted for the 20 test scenarios in the testing CSV file using the 'rf' model described above and the results were submitted on the project website. All 20 predictions (not included in the report) turned out to be accurate. 
+
+
+
